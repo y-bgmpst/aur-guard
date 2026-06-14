@@ -1,0 +1,96 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="700" viewBox="0 0 1120 700" role="img" aria-labelledby="title desc">
+  <title id="title">aur-guard dependency model</title>
+  <desc id="desc">Dependency diagram showing aur-guard as a small Rust single binary with core crates, optional external tools, optional OpenAI-compatible API, and no daemon, database, telemetry, package build, or install step.</desc>
+  <defs>
+    <style>
+      .bg { fill: #f6f7f2; }
+      .title { fill: #18201d; font: 700 34px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .subtitle { fill: #52615a; font: 500 16px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .label { fill: #18201d; font: 700 20px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .text { fill: #2e3a35; font: 500 15px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .small { fill: #52615a; font: 500 13px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .mono { fill: #18201d; font: 600 14px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .card { fill: #fffef9; stroke: #ccd5c9; stroke-width: 2; rx: 8; }
+      .core { fill: #1f4d3a; }
+      .coreText { fill: #ffffff; font: 800 30px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .coreSub { fill: #d9eadf; font: 600 15px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .accent { fill: #2b7a5b; }
+      .warn { fill: #b15f22; }
+      .no { fill: #7c2d2d; }
+      .line { stroke: #8fa097; stroke-width: 2.5; fill: none; }
+      .dash { stroke: #b15f22; stroke-width: 2.5; stroke-dasharray: 7 6; fill: none; }
+      .pill { fill: #e8efe7; stroke: #c6d2c4; stroke-width: 1.5; rx: 6; }
+      .pillText { fill: #26342f; font: 700 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    </style>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#8fa097"/>
+    </marker>
+    <marker id="arrowWarn" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#b15f22"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" width="1120" height="700"/>
+  <text class="title" x="60" y="70">aur-guard dependency model</text>
+  <text class="subtitle" x="60" y="100">Small static-audit CLI: deterministic checks first, optional LLM review, no build or install of untrusted packages.</text>
+
+  <rect class="core" x="390" y="245" width="340" height="155" rx="8"/>
+  <text class="coreText" x="560" y="308" text-anchor="middle">aur-guard</text>
+  <text class="coreSub" x="560" y="338" text-anchor="middle">single Rust binary</text>
+  <text class="coreSub" x="560" y="366" text-anchor="middle">static inspection only</text>
+
+  <rect class="card" x="60" y="170" width="265" height="210"/>
+  <text class="label" x="90" y="215">Rust crates</text>
+  <rect class="pill" x="90" y="240" width="82" height="28"/><text class="pillText" x="131" y="259" text-anchor="middle">clap</text>
+  <rect class="pill" x="184" y="240" width="88" height="28"/><text class="pillText" x="228" y="259" text-anchor="middle">serde</text>
+  <rect class="pill" x="90" y="282" width="92" height="28"/><text class="pillText" x="136" y="301" text-anchor="middle">regex</text>
+  <rect class="pill" x="194" y="282" width="88" height="28"/><text class="pillText" x="238" y="301" text-anchor="middle">toml</text>
+  <rect class="pill" x="90" y="324" width="100" height="28"/><text class="pillText" x="140" y="343" text-anchor="middle">walkdir</text>
+  <rect class="pill" x="202" y="324" width="94" height="28"/><text class="pillText" x="249" y="343" text-anchor="middle">reqwest</text>
+  <text class="small" x="90" y="374">No embedded scripting runtime.</text>
+
+  <rect class="card" x="795" y="170" width="265" height="210"/>
+  <text class="label" x="825" y="215">External tools</text>
+  <text class="text" x="825" y="252">Required for AUR-by-name:</text>
+  <text class="mono" x="850" y="280">git</text>
+  <text class="text" x="825" y="318">Wrapper mode invokes:</text>
+  <text class="mono" x="850" y="346">makepkg / yay / paru</text>
+  <text class="small" x="825" y="374">aur-guard runs before build/install.</text>
+
+  <rect class="card" x="60" y="445" width="265" height="165"/>
+  <text class="label" x="90" y="490">Inputs</text>
+  <text class="text" x="90" y="525">AUR package name</text>
+  <text class="text" x="90" y="555">Local PKGBUILD directory</text>
+  <text class="text" x="90" y="585">Wrapper command line</text>
+
+  <rect class="card" x="390" y="465" width="340" height="145"/>
+  <text class="label" x="425" y="510">Outputs</text>
+  <text class="text" x="425" y="545">Human report, plain text, JSON</text>
+  <text class="text" x="425" y="575">PASS / WARN / FAIL + exit code</text>
+
+  <rect class="card" x="795" y="445" width="265" height="165"/>
+  <text class="label" x="825" y="490">Optional LLM</text>
+  <text class="text" x="825" y="525">OpenAI-compatible API</text>
+  <text class="text" x="825" y="555">Redacted snippets only</text>
+  <text class="small" x="825" y="585">Never overrides deterministic FAIL.</text>
+
+  <rect class="card" x="390" y="130" width="340" height="74"/>
+  <text class="label" x="425" y="174">Deliberately absent</text>
+
+  <g transform="translate(405 210)">
+    <circle class="no" cx="11" cy="11" r="11"/><text x="11" y="16" text-anchor="middle" fill="#fff" font-size="16" font-weight="800">×</text>
+    <text class="small" x="30" y="16">daemon</text>
+    <circle class="no" cx="108" cy="11" r="11"/><text x="108" y="16" text-anchor="middle" fill="#fff" font-size="16" font-weight="800">×</text>
+    <text class="small" x="127" y="16">database</text>
+    <circle class="no" cx="218" cy="11" r="11"/><text x="218" y="16" text-anchor="middle" fill="#fff" font-size="16" font-weight="800">×</text>
+    <text class="small" x="237" y="16">telemetry</text>
+  </g>
+
+  <path class="line" d="M325 278 C350 278 365 292 390 314" marker-end="url(#arrow)"/>
+  <path class="line" d="M795 278 C770 278 755 292 730 314" marker-end="url(#arrow)"/>
+  <path class="line" d="M325 528 C355 505 365 445 420 390" marker-end="url(#arrow)"/>
+  <path class="line" d="M560 400 L560 465" marker-end="url(#arrow)"/>
+  <path class="dash" d="M795 528 C760 500 742 430 690 388" marker-end="url(#arrowWarn)"/>
+
+  <text class="small" x="60" y="655">Runtime stance: clone/fetch into a temporary directory, parse hostile input as text, cap file sizes, skip huge vendor trees by default.</text>
+</svg>

