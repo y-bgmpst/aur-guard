@@ -48,6 +48,8 @@ pub struct AuditArgs {
     pub plain: bool,
 
     /// Enable optional OpenAI-compatible LLM review.
+    ///
+    /// Claude, Gemini, and other models require an OpenAI-compatible endpoint.
     #[arg(long)]
     pub llm: bool,
 

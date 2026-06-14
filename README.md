@@ -61,6 +61,12 @@ Enable optional LLM review:
 OPENAI_API_KEY=... aur-guard audit --llm paru
 ```
 
+`aur-guard` speaks the OpenAI-compatible chat completions protocol. That works
+with OpenAI directly and with providers or gateways that expose the same API
+shape, including OpenRouter, LiteLLM, vLLM, Ollama-compatible gateways, and
+Claude, Gemini, Mistral, Llama, or other models when served through an
+OpenAI-compatible endpoint.
+
 Use as a makepkg wrapper:
 
 ```sh
@@ -165,6 +171,11 @@ It does not send entire repositories blindly. It redacts common secret shapes an
 local paths before sending prompts. LLM output is advisory text only and cannot
 downgrade deterministic FAIL findings.
 
+Provider note: `base_url` must expose an OpenAI-compatible `/chat/completions`
+endpoint. Native provider APIs with different request/response formats are not
+called directly; use a compatible endpoint or gateway for Claude, Gemini, or
+other non-OpenAI models.
+
 ## Source Handling
 
 `aur-guard audit <package>` clones `https://aur.archlinux.org/<package>.git` into
@@ -188,7 +199,8 @@ Keep:
 - audit by AUR package name
 - audit local package directory
 - makepkg wrapper workflow
-- OpenAI-compatible optional analysis
+- OpenAI-compatible optional analysis, including Claude/Gemini-style models when
+  routed through a compatible endpoint
 
 Remove:
 

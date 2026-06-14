@@ -11,7 +11,8 @@ helpers.
 - standalone package audit command
 - local `--pkgdir` audit
 - makepkg/yay/paru style wrapper mode
-- OpenAI-compatible provider support
+- OpenAI-compatible provider support, including Claude/Gemini-style models when
+  exposed through a compatible endpoint or gateway
 - final report intended to guide manual review
 
 ## Removed

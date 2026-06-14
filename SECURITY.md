@@ -51,6 +51,11 @@ LLM mode is off by default. When enabled:
 - only deterministic findings and small relevant snippets are sent
 - LLM output is advisory and cannot downgrade deterministic findings
 
+The LLM client uses the OpenAI-compatible chat completions protocol. OpenAI can
+be used directly. Claude, Gemini, Mistral, Llama, local models, and other
+providers require an endpoint or gateway that presents the same
+`/chat/completions` API shape.
+
 LLMs can produce false positives and false negatives. Treat LLM notes as review
 hints, not as authorization to install.
 

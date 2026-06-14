@@ -70,9 +70,10 @@
 
   <rect class="card" x="795" y="445" width="265" height="165"/>
   <text class="label" x="825" y="490">Optional LLM</text>
-  <text class="text" x="825" y="525">OpenAI-compatible API</text>
-  <text class="text" x="825" y="555">Redacted snippets only</text>
-  <text class="small" x="825" y="585">Never overrides deterministic FAIL.</text>
+  <text class="text" x="825" y="523">OpenAI-compatible API</text>
+  <text class="small" x="825" y="552">OpenAI, Claude, Gemini,</text>
+  <text class="small" x="825" y="574">Mistral, Llama via endpoint</text>
+  <text class="small" x="825" y="596">Never overrides deterministic FAIL.</text>
 
   <rect class="card" x="390" y="130" width="340" height="74"/>
   <text class="label" x="425" y="174">Deliberately absent</text>
