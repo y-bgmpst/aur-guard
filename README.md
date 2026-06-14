@@ -17,6 +17,8 @@ The tool is an assistant for manual review. A clean report means only that no
 high-risk findings were detected by the implemented checks. It does not prove
 that a package is safe.
 
+![aur-guard scan report](docs/assets/aur-guard-scan.png)
+
 ## Install
 
 From source:
@@ -176,6 +178,8 @@ HTTPS non-VCS files are fetched into a tempdir and scanned as inert bytes.
 
 Large files, binary files, `.git`, `pkg`, `src`, `target`, and common vendored
 directories are skipped by default.
+
+![aur-guard dependency model](docs/assets/aur-guard-dependencies.png)
 
 ## What Changed From aur-sleuth
 
