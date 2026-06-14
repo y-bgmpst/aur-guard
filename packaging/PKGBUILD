@@ -4,7 +4,7 @@ pkgver=0.1.0
 pkgrel=1
 pkgdesc='Static AUR package security auditing CLI'
 arch=('x86_64')
-url='https://github.com/rhax/aur-guard'
+url='https://github.com/y-bgmpst/aur-guard'
 license=('MIT')
 depends=('gcc-libs' 'git')
 makedepends=('cargo')
@@ -14,17 +14,17 @@ sha256sums=('0000000000000000000000000000000000000000000000000000000000000000')
 
 prepare() {
   cd "${pkgname}-${pkgver}"
-  cargo fetch --locked --target "$CARCH-unknown-linux-gnu"
+  cargo fetch --target "$CARCH-unknown-linux-gnu"
 }
 
 build() {
   cd "${pkgname}-${pkgver}"
-  cargo build --release --frozen
+  cargo build --release
 }
 
 check() {
   cd "${pkgname}-${pkgver}"
-  cargo test --frozen
+  cargo test
 }
 
 package() {

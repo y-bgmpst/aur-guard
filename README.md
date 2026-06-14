@@ -22,7 +22,7 @@ that a package is safe.
 From source:
 
 ```sh
-cargo build --release --locked
+cargo build --release
 ```
 
 Optional install target:

@@ -5,10 +5,10 @@ CARGO ?= cargo
 .PHONY: build check install uninstall
 
 build:
-	$(CARGO) build --release --locked
+	$(CARGO) build --release
 
 check:
-	$(CARGO) test --locked
+	$(CARGO) test
 
 install: build
 	install -d "$(DESTDIR)$(PREFIX)/bin"
