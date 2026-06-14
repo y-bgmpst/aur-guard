@@ -1,0 +1,10 @@
+pub mod aur;
+pub mod cli;
+pub mod config;
+pub mod llm_optional;
+pub mod pkgbuild_parser;
+pub mod report;
+pub mod rules;
+pub mod scanner;
+pub mod source_fetcher;
+pub mod wrapper;

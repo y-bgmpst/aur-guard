@@ -1,0 +1,36 @@
+# Maintainer: rhax <rhax@example.invalid>
+pkgname=aur-guard
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Static AUR package security auditing CLI'
+arch=('x86_64')
+url='https://github.com/rhax/aur-guard'
+license=('MIT')
+depends=('gcc-libs' 'git')
+makedepends=('cargo')
+source=("${pkgname}-${pkgver}.tar.gz::${url}/archive/refs/tags/v${pkgver}.tar.gz")
+# Replace this with the release tarball checksum before publishing.
+sha256sums=('0000000000000000000000000000000000000000000000000000000000000000')
+
+prepare() {
+  cd "${pkgname}-${pkgver}"
+  cargo fetch --locked --target "$CARCH-unknown-linux-gnu"
+}
+
+build() {
+  cd "${pkgname}-${pkgver}"
+  cargo build --release --frozen
+}
+
+check() {
+  cd "${pkgname}-${pkgver}"
+  cargo test --frozen
+}
+
+package() {
+  cd "${pkgname}-${pkgver}"
+  install -Dm755 "target/release/aur-guard" "$pkgdir/usr/bin/aur-guard"
+  install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+  install -Dm644 SECURITY.md "$pkgdir/usr/share/doc/$pkgname/SECURITY.md"
+  install -Dm644 COMPARISON.md "$pkgdir/usr/share/doc/$pkgname/COMPARISON.md"
+}
