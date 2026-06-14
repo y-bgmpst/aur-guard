@@ -1,0 +1,11 @@
+pkgname=aur-guard-benign
+pkgver=1.0.0
+pkgrel=1
+pkgdesc='Small benign fixture package'
+arch=('any')
+source=('hello.sh')
+sha256sums=('0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef')
+
+package() {
+  install -Dm755 "$srcdir/hello.sh" "$pkgdir/usr/bin/hello-aur-guard"
+}

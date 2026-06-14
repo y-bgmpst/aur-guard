@@ -1,0 +1,9 @@
+pkgbase = aur-guard-benign
+	pkgdesc = Small benign fixture package
+	pkgver = 1.0.0
+	pkgrel = 1
+	arch = any
+	source = hello.sh
+	sha256sums = 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+
+pkgname = aur-guard-benign

