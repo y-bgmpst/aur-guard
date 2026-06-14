@@ -207,3 +207,8 @@ Redesign:
 - fail-closed wrapper mode with `--warn-only`
 - TOML config at `~/.config/aur-guard/config.toml`
 - bounded file reads and ignored large/vendored directories
+
+## License
+
+`aur-guard` is licensed under the GNU General Public License version 3. See
+`LICENSE`.

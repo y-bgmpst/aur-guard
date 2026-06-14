@@ -5,7 +5,7 @@ pkgrel=1
 pkgdesc='Static AUR package security auditing CLI'
 arch=('x86_64')
 url='https://github.com/y-bgmpst/aur-guard'
-license=('MIT')
+license=('GPL-3.0-only')
 depends=('gcc-libs' 'git')
 makedepends=('cargo')
 source=("${pkgname}-${pkgver}.tar.gz::${url}/archive/refs/tags/v${pkgver}.tar.gz")
@@ -33,4 +33,5 @@ package() {
   install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
   install -Dm644 SECURITY.md "$pkgdir/usr/share/doc/$pkgname/SECURITY.md"
   install -Dm644 COMPARISON.md "$pkgdir/usr/share/doc/$pkgname/COMPARISON.md"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }
