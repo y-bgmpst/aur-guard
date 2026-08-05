@@ -23,6 +23,21 @@ fn git(repo: &Path, args: &[&str]) -> String {
     String::from_utf8(output.stdout).unwrap().trim().to_string()
 }
 
+fn init_package_repo() -> tempfile::TempDir {
+    let repo = tempfile::tempdir().unwrap();
+    git(repo.path(), &["init", "--quiet"]);
+    git(repo.path(), &["config", "user.name", "aur-guard test"]);
+    git(repo.path(), &["config", "user.email", "aur-guard@example.invalid"]);
+    fs::write(
+        repo.path().join("PKGBUILD"),
+        "pkgname=fixture\npkgver=1\npkgrel=1\narch=('any')\nsource=()\nsha256sums=()\npackage() { :; }\n",
+    )
+    .unwrap();
+    git(repo.path(), &["add", "PKGBUILD"]);
+    git(repo.path(), &["commit", "--quiet", "-m", "trusted baseline"]);
+    repo
+}
+
 #[test]
 fn benign_fixture_passes() {
     let mut cmd = Command::cargo_bin("aur-guard").unwrap();
@@ -49,18 +64,7 @@ fn malicious_fixture_fails_closed() {
 
 #[test]
 fn revision_audit_flags_pkgbuild_delta() {
-    let repo = tempfile::tempdir().unwrap();
-    git(repo.path(), &["init", "--quiet"]);
-    git(repo.path(), &["config", "user.name", "aur-guard test"]);
-    git(repo.path(), &["config", "user.email", "aur-guard@example.invalid"]);
-
-    fs::write(
-        repo.path().join("PKGBUILD"),
-        "pkgname=fixture\npkgver=1\npkgrel=1\narch=('any')\nsource=()\nsha256sums=()\npackage() { :; }\n",
-    )
-    .unwrap();
-    git(repo.path(), &["add", "PKGBUILD"]);
-    git(repo.path(), &["commit", "--quiet", "-m", "trusted baseline"]);
+    let repo = init_package_repo();
     let baseline = git(repo.path(), &["rev-parse", "HEAD"]);
 
     fs::write(
@@ -89,11 +93,12 @@ fn revision_audit_flags_pkgbuild_delta() {
 
 #[test]
 fn missing_revision_is_a_tool_error_not_a_pass() {
+    let repo = init_package_repo();
     let mut cmd = Command::cargo_bin("aur-guard").unwrap();
     cmd.args([
         "audit",
         "--pkgdir",
-        &fixture("benign"),
+        repo.path().to_str().unwrap(),
         "--since",
         "definitely-not-a-revision",
         "--plain",
