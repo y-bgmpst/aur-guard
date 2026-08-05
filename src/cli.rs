@@ -6,7 +6,9 @@ use clap::{Args, CommandFactory, Parser, Subcommand, error::ErrorKind};
 use crate::{
     aur,
     config::{Config, OutputFormat},
-    llm_optional, scanner, wrapper,
+    llm_optional,
+    report::AuditReport,
+    revision, scanner, wrapper,
 };
 
 #[derive(Debug, Parser)]
@@ -34,6 +36,10 @@ pub struct AuditArgs {
     /// Audit an existing local package directory containing a PKGBUILD.
     #[arg(long, value_name = "DIR")]
     pub pkgdir: Option<PathBuf>,
+
+    /// Compare the candidate against an explicitly trusted Git revision.
+    #[arg(long, value_name = "REV")]
+    pub since: Option<String>,
 
     /// Override AUR clone URL. Defaults to https://aur.archlinux.org/<package>.git.
     #[arg(long)]
@@ -151,10 +157,22 @@ pub fn run_audit(args: AuditArgs) -> Result<u8> {
             .with_context(|| format!("invalid --pkgdir {}", pkgdir.display()))?
     } else {
         let package = args.package.as_deref().expect("checked above");
-        aur::clone_package(package, args.clone_url.as_deref(), &config)?
+        aur::clone_package(
+            package,
+            args.clone_url.as_deref(),
+            &config,
+            args.since.is_some(),
+        )?
     };
 
     let mut report = scanner::audit_target(&target, &config)?;
+    if let Some(baseline) = args.since.as_deref() {
+        let revision_findings = revision::audit_revision(target.root(), baseline)?;
+        let mut findings = report.findings;
+        findings.extend(revision_findings);
+        report = AuditReport::new(report.target, findings, report.skipped);
+    }
+
     if config.llm.enabled {
         let notes = llm_optional::review(&report, target.root(), &config)?;
         report = report.with_llm_notes(notes);
