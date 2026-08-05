@@ -65,6 +65,7 @@ pub fn clone_package(
     package: &str,
     clone_url: Option<&str>,
     config: &Config,
+    full_history: bool,
 ) -> Result<PreparedTarget> {
     validate_package_name(package)?;
 
@@ -80,7 +81,7 @@ pub fn clone_package(
         .map(ToOwned::to_owned)
         .unwrap_or_else(|| format!("https://aur.archlinux.org/{package}.git"));
 
-    run_git_clone(&url, &root, config)?;
+    run_git_clone(&url, &root, config, full_history)?;
 
     if !root.join("PKGBUILD").is_file() {
         bail!("cloned repository does not contain a PKGBUILD");
@@ -93,16 +94,20 @@ pub fn clone_package(
     })
 }
 
-fn run_git_clone(url: &str, root: &Path, config: &Config) -> Result<()> {
-    let mut child = Command::new("git")
-        .args(["clone", "--depth", "1", "--no-tags", "--"])
+fn run_git_clone(url: &str, root: &Path, config: &Config, full_history: bool) -> Result<()> {
+    let mut command = Command::new("git");
+    command.arg("clone");
+    if !full_history {
+        command.args(["--depth", "1"]);
+    }
+    command
+        .args(["--no-tags", "--"])
         .arg(url)
         .arg(root)
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .context("failed to run git clone")?;
+        .stderr(Stdio::piped());
 
+    let mut child = command.spawn().context("failed to run git clone")?;
     let stdout = child
         .stdout
         .take()
