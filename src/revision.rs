@@ -184,7 +184,7 @@ fn validate_revision(revision: &str) -> Result<()> {
     if revision.trim().is_empty() || revision.len() > 256 {
         bail!("baseline revision must contain 1 to 256 characters");
     }
-    if revision.starts_with('-') || revision.contains(char::is_whitespace) {
+    if revision.starts_with('-') || revision.chars().any(char::is_whitespace) {
         bail!("baseline revision contains unsafe characters");
     }
     Ok(())
