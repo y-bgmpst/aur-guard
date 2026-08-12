@@ -32,9 +32,8 @@ generated scripts, the correct result is manual review.
 
 ## Execution Boundary
 
-`aur-guard` must not run:
+The audit path must not run package-controlled operations, including:
 
-- `makepkg`
 - `pkgver()`
 - `prepare()`
 - `build()`
@@ -42,6 +41,10 @@ generated scripts, the correct result is manual review.
 - `package()`
 - `.install` script functions
 - package-provided hooks or scripts
+
+Wrapper mode is the explicit exception at the process boundary: after a
+successful audit it invokes `/usr/bin/makepkg`, which is expected to process
+the package. The audit itself never invokes that package-controlled code.
 
 Wrapper mode executes only `/usr/bin/makepkg` (with `makepkg` accepted as an
 input alias). It audits before every package-processing invocation. Only
