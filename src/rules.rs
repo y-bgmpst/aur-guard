@@ -78,6 +78,20 @@ pub fn scan_pkgbuild_metadata(pkgbuild: &Pkgbuild) -> Vec<Finding> {
     }
 
     if let Some(install) = &pkgbuild.install {
+        if install.dynamic {
+            findings.push(
+                Finding::new(
+                    "pkgbuild.dynamic-install",
+                    Severity::High,
+                    "PKGBUILD",
+                    install.line,
+                    "Dynamic install script path",
+                    "The install script path contains shell expansion that cannot be resolved statically.",
+                    "Resolve and inspect the install script path manually before building.",
+                )
+                .with_snippet(&install.raw),
+            );
+        }
         findings.push(
             Finding::new(
                 "pkgbuild.install-script",
@@ -127,6 +141,7 @@ pub fn scan_pkgbuild_metadata(pkgbuild: &Pkgbuild) -> Vec<Finding> {
 
 pub fn scan_text_file(rel_path: &str, text: &str) -> Vec<Finding> {
     let mut findings = Vec::new();
+    scan_unsupported_shell(rel_path, text, &mut findings);
 
     if rel_path.ends_with(".install") {
         findings.push(Finding::new(
@@ -177,6 +192,89 @@ pub fn scan_text_file(rel_path: &str, text: &str) -> Vec<Finding> {
 
     scan_chmod_execute(rel_path, &lines, &mut findings);
     findings
+}
+
+fn scan_unsupported_shell(rel_path: &str, text: &str, findings: &mut Vec<Finding>) {
+    let shell_like = rel_path == "PKGBUILD"
+        || rel_path.ends_with(".install")
+        || rel_path.ends_with(".sh")
+        || rel_path.ends_with(".bash");
+    if !shell_like {
+        return;
+    }
+
+    for (line_no, line) in text.lines().enumerate() {
+        let trimmed = line.trim();
+        let unsupported =
+            re(r"\$\(|`|\$\{|\b(eval|declare\s+-n)\b|<\(|>\(|<<-?[[:space:]]*[A-Za-z_]")
+                .is_match(trimmed);
+        if unsupported {
+            findings.push(
+                Finding::new(
+                    "manual-review.unsupported-shell",
+                    Severity::Medium,
+                    rel_path,
+                    line_no + 1,
+                    "Shell construct requires manual review",
+                    "This shell construct is outside the lightweight static parser's reliable analysis boundary.",
+                    "Inspect the complete construct and its expanded behavior before building.",
+                )
+                .with_snippet(trimmed),
+            );
+        }
+    }
+
+    if shell_like && has_unbalanced_shell_delimiters(text) {
+        findings.push(
+            Finding::new(
+                "manual-review.ambiguous-shell",
+                Severity::High,
+                rel_path,
+                1,
+                "Ambiguous shell syntax",
+                "Quotes or structural delimiters are not balanced well enough for reliable static analysis.",
+                "Resolve the syntax manually before building.",
+            )
+            .with_snippet(first_lines(text, 4)),
+        );
+    }
+}
+
+fn has_unbalanced_shell_delimiters(text: &str) -> bool {
+    let mut single = false;
+    let mut double = false;
+    let mut escaped = false;
+    let mut braces = 0i32;
+    let mut parens = 0i32;
+
+    for ch in text.chars() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if ch == '\\' && !single {
+            escaped = true;
+            continue;
+        }
+        if ch == '\'' && !double {
+            single = !single;
+        } else if ch == '"' && !single {
+            double = !double;
+        } else if !single && !double {
+            match ch {
+                '{' => braces += 1,
+                '}' => braces -= 1,
+                '(' => parens += 1,
+                ')' => parens -= 1,
+                _ => {}
+            }
+            if braces < 0 || parens < 0 {
+                return true;
+            }
+        }
+    }
+
+    single || double || braces != 0 || parens != 0
 }
 
 pub fn scan_srcinfo(entries: &[SrcInfoEntry]) -> Vec<Finding> {
@@ -541,5 +639,28 @@ mod tests {
     fn detects_base64_decode_long_option() {
         let findings = scan_text_file("bad.install", "echo ZWNobyBoaQ== | base64 --decode | sh");
         assert!(findings.iter().any(|f| f.rule_id == "obfuscation.decoder"));
+    }
+
+    #[test]
+    fn detects_unsupported_shell_constructs() {
+        let findings = scan_text_file(
+            "PKGBUILD",
+            "prepare() {\n  eval \"$(cat payload)\"\n  cat <(printf x)\n  cat <<EOF\nsecret\nEOF\n}",
+        );
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.rule_id == "manual-review.unsupported-shell")
+        );
+    }
+
+    #[test]
+    fn detects_ambiguous_shell_syntax() {
+        let findings = scan_text_file("PKGBUILD", "prepare() { echo \"unterminated\n");
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.rule_id == "manual-review.ambiguous-shell")
+        );
     }
 }

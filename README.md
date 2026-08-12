@@ -86,6 +86,11 @@ aur-guard audit --warn-only package-name
 aur-guard wrapper --warn-only -- makepkg -si
 ```
 
+Wrapper mode is restricted to `/usr/bin/makepkg`; it accepts `makepkg` as a
+compatibility alias but does not execute arbitrary commands. It audits before
+all package-processing makepkg options. Only `--help`, `-h`, `--version`, and
+`-V` bypass the audit because they do not load a package build file.
+
 ## Exit Codes
 
 - `0`: pass, or warn/fail when `--warn-only` is set
@@ -187,6 +192,11 @@ Local sources referenced from the `source` array are scanned when present. Remot
 source downloads are disabled by default. With `--fetch-remote-sources`, only small
 HTTPS non-VCS files are fetched into a tempdir and scanned as inert bytes.
 
+Fetched URLs are checked for HTTPS, credentials, globally routable targets, and
+a small redirect limit; private, loopback, link-local, and similar targets are
+rejected. A source that cannot be safely inspected is reported as
+security-relevant and prevents a default fail-closed wrapper run.
+
 Large files, binary files, `.git`, `pkg`, `src`, `target`, and common vendored
 directories are skipped by default.
 
@@ -217,6 +227,7 @@ Redesign:
 - explicit PASS / WARN / FAIL report model
 - JSON output for automation
 - fail-closed wrapper mode with `--warn-only`
+- security-relevant uninspectable input cannot produce PASS
 - TOML config at `~/.config/aur-guard/config.toml`
 - bounded file reads and ignored large/vendored directories
 

@@ -33,10 +33,7 @@ pub fn audit_target(target: &PreparedTarget, config: &Config) -> Result<AuditRep
                 "The primary build script could not be read within configured safety limits.",
                 "Inspect the PKGBUILD manually before any build operation.",
             ));
-            skipped.push(SkippedFile {
-                file: "PKGBUILD".to_string(),
-                reason,
-            });
+            skipped.push(SkippedFile::security_relevant("PKGBUILD", reason));
             String::new()
         }
     };
@@ -60,8 +57,13 @@ pub fn audit_target(target: &PreparedTarget, config: &Config) -> Result<AuditRep
 
     let srcinfo_path = root.join(".SRCINFO");
     if srcinfo_path.exists() {
-        if let ReadFile::Text(srcinfo_text) = read_text_file(&srcinfo_path, config.max_file_bytes) {
-            findings.extend(rules::scan_srcinfo(&parse_srcinfo(&srcinfo_text)));
+        match read_text_file(&srcinfo_path, config.max_file_bytes) {
+            ReadFile::Text(srcinfo_text) => {
+                findings.extend(rules::scan_srcinfo(&parse_srcinfo(&srcinfo_text)));
+            }
+            ReadFile::Skipped(reason) => {
+                skipped.push(SkippedFile::security_relevant(".SRCINFO", reason));
+            }
         }
         add_existing_file(root, &srcinfo_path, &mut files, false, &mut skipped);
     }
@@ -87,10 +89,10 @@ pub fn audit_target(target: &PreparedTarget, config: &Config) -> Result<AuditRep
     let mut inspected = 0usize;
     for (path, label) in files {
         if inspected >= config.max_files {
-            skipped.push(SkippedFile {
-                file: label,
-                reason: "max_files limit reached".to_string(),
-            });
+            skipped.push(SkippedFile::security_relevant(
+                label,
+                "max_files limit reached",
+            ));
             continue;
         }
         match read_text_file(&path, config.max_file_bytes) {
@@ -98,10 +100,9 @@ pub fn audit_target(target: &PreparedTarget, config: &Config) -> Result<AuditRep
                 inspected += 1;
                 findings.extend(rules::scan_text_file(&label, &text));
             }
-            ReadFile::Skipped(reason) => skipped.push(SkippedFile {
-                file: label,
-                reason,
-            }),
+            ReadFile::Skipped(reason) => {
+                skipped.push(SkippedFile::security_relevant(label, reason))
+            }
         }
     }
 
@@ -118,13 +119,12 @@ fn collect_tree_files(
         let entry = match entry {
             Ok(entry) => entry,
             Err(err) => {
-                skipped.push(SkippedFile {
-                    file: err
-                        .path()
+                skipped.push(SkippedFile::security_relevant(
+                    err.path()
                         .map(|path| path.display().to_string())
                         .unwrap_or_else(|| "<unknown>".to_string()),
-                    reason: err.to_string(),
-                });
+                    err.to_string(),
+                ));
                 continue;
             }
         };
@@ -178,28 +178,41 @@ fn add_existing_file(
     skipped: &mut Vec<SkippedFile>,
 ) {
     if !path.exists() {
+        if let Ok(metadata) = fs::symlink_metadata(path)
+            && metadata.file_type().is_symlink()
+        {
+            skipped.push(SkippedFile::security_relevant(
+                path.display().to_string(),
+                "broken symlink could not be inspected",
+            ));
+        }
         return;
     }
 
     let Ok(canonical) = path.canonicalize() else {
-        skipped.push(SkippedFile {
-            file: path.display().to_string(),
-            reason: "failed to canonicalize file".to_string(),
-        });
+        skipped.push(SkippedFile::security_relevant(
+            path.display().to_string(),
+            "failed to canonicalize file",
+        ));
         return;
     };
 
     if !allow_outside && !canonical.starts_with(root) {
-        skipped.push(SkippedFile {
-            file: path.display().to_string(),
-            reason: "file resolves outside package directory".to_string(),
-        });
+        skipped.push(SkippedFile::security_relevant(
+            path.display().to_string(),
+            "file resolves outside package directory",
+        ));
         return;
     }
 
     if canonical.is_file() {
         let label = relative_label(root, &canonical);
         files.entry(canonical).or_insert(label);
+    } else {
+        skipped.push(SkippedFile::security_relevant(
+            path.display().to_string(),
+            "referenced path is not a regular file",
+        ));
     }
 }
 
@@ -273,5 +286,46 @@ mod tests {
                 .any(|f| f.rule_id == "shell.remote-pipe")
         );
         assert!(report.findings.iter().any(|f| f.rule_id == "checksum.skip"));
+    }
+
+    #[test]
+    fn relevant_source_limits_do_not_pass() {
+        let dir = tempdir().unwrap();
+        fs::write(
+            dir.path().join("PKGBUILD"),
+            "pkgname=limited\npkgver=1\nsource=('payload.sh')\n",
+        )
+        .unwrap();
+        fs::write(dir.path().join("payload.sh"), "echo payload\n").unwrap();
+        let target = crate::aur::prepare_local(dir.path()).unwrap();
+        let config = Config {
+            max_file_bytes: 1,
+            ..Config::default()
+        };
+        let report = audit_target(&target, &config).unwrap();
+        assert_ne!(report.status, crate::report::AuditStatus::Pass);
+        assert!(
+            report
+                .skipped
+                .iter()
+                .any(|file| file.is_security_relevant())
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn broken_symlink_does_not_pass_silently() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("PKGBUILD"), "pkgname=broken\npkgver=1\n").unwrap();
+        std::os::unix::fs::symlink("missing.sh", dir.path().join("broken.sh")).unwrap();
+        let target = crate::aur::prepare_local(dir.path()).unwrap();
+        let report = audit_target(&target, &Config::default()).unwrap();
+        assert_eq!(report.status, crate::report::AuditStatus::Warn);
+        assert!(
+            report
+                .skipped
+                .iter()
+                .any(|file| file.reason.contains("broken symlink"))
+        );
     }
 }

@@ -112,6 +112,36 @@ impl Finding {
 pub struct SkippedFile {
     pub file: String,
     pub reason: String,
+    pub classification: SkipClassification,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SkipClassification {
+    Expected,
+    SecurityRelevant,
+}
+
+impl SkippedFile {
+    pub fn expected(file: impl Into<String>, reason: impl Into<String>) -> Self {
+        Self {
+            file: file.into(),
+            reason: reason.into(),
+            classification: SkipClassification::Expected,
+        }
+    }
+
+    pub fn security_relevant(file: impl Into<String>, reason: impl Into<String>) -> Self {
+        Self {
+            file: file.into(),
+            reason: reason.into(),
+            classification: SkipClassification::SecurityRelevant,
+        }
+    }
+
+    pub fn is_security_relevant(&self) -> bool {
+        self.classification == SkipClassification::SecurityRelevant
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -152,6 +182,7 @@ impl AuditReport {
         } else if findings
             .iter()
             .any(|finding| finding.severity >= Severity::Low)
+            || skipped.iter().any(SkippedFile::is_security_relevant)
         {
             AuditStatus::Warn
         } else {
@@ -206,7 +237,15 @@ impl AuditReport {
         if !self.skipped.is_empty() {
             out.push_str("\nSkipped files:\n");
             for skipped in &self.skipped {
-                out.push_str(&format!("  {}: {}\n", skipped.file, skipped.reason));
+                out.push_str(&format!(
+                    "  {} [{}]: {}\n",
+                    skipped.file,
+                    match skipped.classification {
+                        SkipClassification::Expected => "expected",
+                        SkipClassification::SecurityRelevant => "security-relevant",
+                    },
+                    skipped.reason
+                ));
             }
         }
 
@@ -256,6 +295,17 @@ Findings:
   rule: test.rule
   why: A command would fetch remote code and execute it.
   review: Inspect the command before running makepkg.
-");
+        ");
+    }
+
+    #[test]
+    fn security_relevant_skips_warn_without_overriding_failures() {
+        let report = AuditReport::new(
+            "fixture",
+            vec![],
+            vec![SkippedFile::security_relevant("payload.sh", "size limit")],
+        );
+        assert_eq!(report.status, AuditStatus::Warn);
+        assert!(report.to_text(false).contains("security-relevant"));
     }
 }

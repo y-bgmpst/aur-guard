@@ -12,7 +12,7 @@ use crate::{
 };
 
 pub fn run(args: WrapperArgs, config: Config) -> Result<u8> {
-    let (command, command_args) = split_command(args.command);
+    let (command, command_args) = split_command(args.command)?;
 
     if should_skip_audit(&command_args) {
         return run_command(command, command_args);
@@ -39,17 +39,20 @@ pub fn run(args: WrapperArgs, config: Config) -> Result<u8> {
     run_command(command, command_args)
 }
 
-fn split_command(mut raw: Vec<OsString>) -> (OsString, Vec<OsString>) {
+fn split_command(mut raw: Vec<OsString>) -> Result<(OsString, Vec<OsString>)> {
     if raw.is_empty() {
-        return (OsString::from("/usr/bin/makepkg"), Vec::new());
+        return Ok((OsString::from("/usr/bin/makepkg"), Vec::new()));
     }
 
     let first = raw.remove(0);
     if first.to_string_lossy().starts_with('-') {
         raw.insert(0, first);
-        (OsString::from("/usr/bin/makepkg"), raw)
+        Ok((OsString::from("/usr/bin/makepkg"), raw))
     } else {
-        (first, raw)
+        match first.to_string_lossy().as_ref() {
+            "makepkg" | "/usr/bin/makepkg" => Ok((OsString::from("/usr/bin/makepkg"), raw)),
+            other => anyhow::bail!("wrapper only executes /usr/bin/makepkg, not {other}"),
+        }
     }
 }
 
@@ -57,17 +60,7 @@ fn should_skip_audit(args: &[OsString]) -> bool {
     args.iter().any(|arg| {
         matches!(
             arg.to_string_lossy().as_ref(),
-            "--verifysource"
-                | "--nobuild"
-                | "--geninteg"
-                | "--packagelist"
-                | "--printsrcinfo"
-                | "--help"
-                | "-h"
-                | "--version"
-                | "-V"
-                | "-o"
-                | "-g"
+            "--help" | "-h" | "--version" | "-V"
         )
     })
 }
@@ -86,13 +79,40 @@ mod tests {
 
     #[test]
     fn default_command_is_makepkg_when_first_arg_is_option() {
-        let (cmd, args) = split_command(vec![OsString::from("-si")]);
+        let (cmd, args) = split_command(vec![OsString::from("-si")]).unwrap();
         assert_eq!(cmd, OsString::from("/usr/bin/makepkg"));
         assert_eq!(args, vec![OsString::from("-si")]);
     }
 
     #[test]
     fn skips_printsrcinfo() {
-        assert!(should_skip_audit(&[OsString::from("--printsrcinfo")]));
+        assert!(!should_skip_audit(&[OsString::from("--printsrcinfo")]));
+    }
+
+    #[test]
+    fn only_help_and_version_skip_audit() {
+        for arg in [
+            "--verifysource",
+            "--nobuild",
+            "--geninteg",
+            "--packagelist",
+            "--printsrcinfo",
+            "-o",
+            "-g",
+        ] {
+            assert!(!should_skip_audit(&[OsString::from(arg)]), "{arg}");
+        }
+        for arg in ["--help", "-h", "--version", "-V"] {
+            assert!(should_skip_audit(&[OsString::from(arg)]), "{arg}");
+        }
+    }
+
+    #[test]
+    fn rejects_non_makepkg_commands() {
+        assert!(split_command(vec![OsString::from("sh")]).is_err());
+        assert_eq!(
+            split_command(vec![OsString::from("makepkg")]).unwrap().0,
+            OsString::from("/usr/bin/makepkg")
+        );
     }
 }
