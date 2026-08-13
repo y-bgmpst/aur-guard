@@ -13,13 +13,13 @@ pub enum Severity {
 }
 
 impl Severity {
-    pub fn score(self) -> u16 {
+    fn score(self) -> u32 {
         match self {
             Self::Info => 1,
-            Self::Low => 5,
-            Self::Medium => 15,
+            Self::Low => 3,
+            Self::Medium => 7,
             Self::High => 30,
-            Self::Critical => 50,
+            Self::Critical => 70,
         }
     }
 
@@ -168,11 +168,7 @@ impl AuditReport {
                 .then_with(|| a.line.cmp(&b.line))
         });
 
-        let risk_score = findings
-            .iter()
-            .map(|finding| finding.severity.score())
-            .sum::<u16>()
-            .min(100);
+        let risk_score = calculate_risk_score(&findings);
 
         let status = if findings
             .iter()
@@ -288,6 +284,40 @@ impl AuditReport {
     }
 }
 
+fn calculate_risk_score(findings: &[Finding]) -> u16 {
+    let mut groups = BTreeMap::<&'static str, Vec<Severity>>::new();
+    for finding in findings {
+        groups
+            .entry(finding.rule_id)
+            .or_default()
+            .push(finding.severity);
+    }
+
+    let total = groups
+        .values_mut()
+        .map(|severities| {
+            severities.sort_by(|left, right| right.cmp(left));
+            let base = severities[0].score();
+            let contribution = severities
+                .iter()
+                .enumerate()
+                .map(|(index, severity)| {
+                    let weight = severity.score();
+                    match index {
+                        0 => weight,
+                        1 => weight / 2,
+                        2 => weight / 4,
+                        _ => weight / 8,
+                    }
+                })
+                .sum::<u32>();
+            contribution.min(base * 2)
+        })
+        .sum::<u32>();
+
+    total.min(100) as u16
+}
+
 fn render_finding(out: &mut String, finding: &Finding) {
     out.push_str(&format!(
         "\n[{}] {}:{} {}\n",
@@ -374,5 +404,135 @@ Findings:
         assert_eq!(text.matches("occurrences:").count(), 1);
         assert!(text.contains("line 1: line 1"));
         assert!(text.contains("line 3: line 3"));
+    }
+
+    fn finding(rule_id: &'static str, severity: Severity) -> Finding {
+        Finding::new(rule_id, severity, "PKGBUILD", 1, "test", "test", "test")
+    }
+
+    #[test]
+    fn risk_score_is_zero_without_findings() {
+        assert_eq!(calculate_risk_score(&[]), 0);
+    }
+
+    #[test]
+    fn risk_score_preserves_severity_order() {
+        assert!(
+            calculate_risk_score(&[finding("low", Severity::Low)])
+                < calculate_risk_score(&[finding("medium", Severity::Medium)])
+        );
+        assert!(
+            calculate_risk_score(&[finding("medium", Severity::Medium)])
+                < calculate_risk_score(&[finding("high", Severity::High)])
+        );
+        assert!(
+            calculate_risk_score(&[finding("high", Severity::High)])
+                < calculate_risk_score(&[finding("critical", Severity::Critical)])
+        );
+    }
+
+    #[test]
+    fn repeated_findings_are_damped() {
+        let one = vec![finding("same", Severity::Medium)];
+        let five = (0..5)
+            .map(|_| finding("same", Severity::Medium))
+            .collect::<Vec<_>>();
+        assert!(calculate_risk_score(&five) > calculate_risk_score(&one));
+        assert!(calculate_risk_score(&five) < calculate_risk_score(&one) * 5);
+        assert!(
+            calculate_risk_score(
+                &(0..100)
+                    .map(|_| finding("same", Severity::Medium))
+                    .collect::<Vec<_>>()
+            ) < 100
+        );
+    }
+
+    #[test]
+    fn distinct_groups_outweigh_repetition_of_one_group() {
+        let repeated = (0..5)
+            .map(|_| finding("same", Severity::Medium))
+            .collect::<Vec<_>>();
+        let distinct = ["one", "two", "three", "four", "five"]
+            .into_iter()
+            .map(|rule| finding(rule, Severity::Medium))
+            .collect::<Vec<_>>();
+        assert!(calculate_risk_score(&distinct) > calculate_risk_score(&repeated));
+    }
+
+    #[test]
+    fn mixed_severity_adds_to_the_score() {
+        let critical = vec![finding("critical", Severity::Critical)];
+        let mixed = vec![
+            finding("critical", Severity::Critical),
+            finding("high", Severity::High),
+            finding("medium", Severity::Medium),
+        ];
+        assert!(calculate_risk_score(&mixed) > calculate_risk_score(&critical));
+    }
+
+    #[test]
+    fn score_is_bounded_and_status_is_independent() {
+        let findings = (0..100)
+            .map(|_| finding("same", Severity::High))
+            .collect::<Vec<_>>();
+        assert_eq!(calculate_risk_score(&findings), 60);
+
+        let low = AuditReport::new("warn", vec![finding("low", Severity::Low)], vec![]);
+        let high = AuditReport::new("fail", vec![finding("high", Severity::High)], vec![]);
+        assert_eq!(low.status, AuditStatus::Warn);
+        assert_eq!(high.status, AuditStatus::Fail);
+        assert_ne!(low.risk_score, high.risk_score);
+    }
+
+    #[test]
+    fn adversarial_counts_remain_deterministic_and_safe() {
+        let same_low = (0..100)
+            .map(|_| finding("low", Severity::Low))
+            .collect::<Vec<_>>();
+        let same_medium = (0..100)
+            .map(|_| finding("medium", Severity::Medium))
+            .collect::<Vec<_>>();
+        let same_high = (0..100)
+            .map(|_| finding("high", Severity::High))
+            .collect::<Vec<_>>();
+        let distinct_low = (0..100)
+            .map(|index| {
+                finding(
+                    Box::leak(format!("low-{index}").into_boxed_str()),
+                    Severity::Low,
+                )
+            })
+            .collect::<Vec<_>>();
+        let distinct_medium = (0..10)
+            .map(|index| {
+                finding(
+                    Box::leak(format!("medium-{index}").into_boxed_str()),
+                    Severity::Medium,
+                )
+            })
+            .collect::<Vec<_>>();
+        let distinct_high = (0..5)
+            .map(|index| {
+                finding(
+                    Box::leak(format!("high-{index}").into_boxed_str()),
+                    Severity::High,
+                )
+            })
+            .collect::<Vec<_>>();
+
+        for findings in [
+            &same_low,
+            &same_medium,
+            &same_high,
+            &distinct_low,
+            &distinct_medium,
+            &distinct_high,
+        ] {
+            assert!(calculate_risk_score(findings) <= 100);
+        }
+        assert!(calculate_risk_score(&distinct_low) > calculate_risk_score(&same_low));
+        assert!(calculate_risk_score(&distinct_medium) > calculate_risk_score(&same_medium));
+        assert!(calculate_risk_score(&distinct_high) > calculate_risk_score(&same_high));
     }
 }
