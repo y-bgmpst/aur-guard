@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{collections::BTreeMap, fmt};
 
 use serde::Serialize;
 
@@ -206,7 +206,6 @@ impl AuditReport {
 
     pub fn to_text(&self, plain: bool) -> String {
         let mut out = String::new();
-        let _ = plain;
         out.push_str("aur-guard audit report\n");
         out.push_str(&format!("target: {}\n", self.target));
         out.push_str(&format!("status: {}\n", self.status));
@@ -217,18 +216,44 @@ impl AuditReport {
             out.push_str("No high-risk findings detected by deterministic checks.\n");
         } else {
             out.push_str("Findings:\n");
-            for finding in &self.findings {
-                out.push_str(&format!(
-                    "\n[{}] {}:{} {}\n",
-                    finding.severity, finding.file, finding.line, finding.title
-                ));
-                out.push_str(&format!("  rule: {}\n", finding.rule_id));
-                out.push_str(&format!("  why: {}\n", finding.message));
-                out.push_str(&format!("  review: {}\n", finding.action));
-                if let Some(snippet) = &finding.snippet {
-                    out.push_str("  snippet:\n");
-                    for line in snippet.lines().take(4) {
-                        out.push_str(&format!("    {}\n", line.trim_end()));
+            if plain {
+                for finding in &self.findings {
+                    render_finding(&mut out, finding);
+                }
+            } else {
+                let mut manual = BTreeMap::<(String, String, String), Vec<&Finding>>::new();
+                for finding in &self.findings {
+                    if finding.rule_id.starts_with("manual-review.") {
+                        manual
+                            .entry((
+                                finding.rule_id.to_string(),
+                                finding.file.clone(),
+                                finding.title.clone(),
+                            ))
+                            .or_default()
+                            .push(finding);
+                    } else {
+                        render_finding(&mut out, finding);
+                    }
+                }
+                for ((rule_id, file, title), findings) in manual {
+                    let first = findings[0];
+                    out.push_str(&format!(
+                        "\n[{}] {} {}\n  rule: {}\n  why: {}\n  review: {}\n  occurrences: {}\n  examples:\n",
+                        first.severity,
+                        file,
+                        title,
+                        rule_id,
+                        first.message,
+                        first.action,
+                        findings.len()
+                    ));
+                    for finding in findings.iter().take(3) {
+                        out.push_str(&format!(
+                            "    line {}: {}\n",
+                            finding.line,
+                            finding.snippet.as_deref().unwrap_or("")
+                        ));
                     }
                 }
             }
@@ -260,6 +285,22 @@ impl AuditReport {
 
     pub fn to_json(&self) -> anyhow::Result<String> {
         Ok(serde_json::to_string_pretty(self)?)
+    }
+}
+
+fn render_finding(out: &mut String, finding: &Finding) {
+    out.push_str(&format!(
+        "\n[{}] {}:{} {}\n",
+        finding.severity, finding.file, finding.line, finding.title
+    ));
+    out.push_str(&format!("  rule: {}\n", finding.rule_id));
+    out.push_str(&format!("  why: {}\n", finding.message));
+    out.push_str(&format!("  review: {}\n", finding.action));
+    if let Some(snippet) = &finding.snippet {
+        out.push_str("  snippet:\n");
+        for line in snippet.lines().take(4) {
+            out.push_str(&format!("    {}\n", line.trim_end()));
+        }
     }
 }
 
@@ -307,5 +348,31 @@ Findings:
         );
         assert_eq!(report.status, AuditStatus::Warn);
         assert!(report.to_text(false).contains("security-relevant"));
+    }
+
+    #[test]
+    fn human_output_aggregates_manual_review_without_changing_status() {
+        let findings = (1..=5)
+            .map(|line| {
+                Finding::new(
+                    "manual-review.unsupported-shell",
+                    Severity::Medium,
+                    "PKGBUILD",
+                    line,
+                    "Shell construct requires manual review",
+                    "Unsupported shell syntax",
+                    "Inspect the construct",
+                )
+                .with_snippet(format!("line {line}"))
+            })
+            .collect();
+        let report = AuditReport::new("fixture", findings, vec![]);
+        let text = report.to_text(false);
+        assert_eq!(report.findings.len(), 5);
+        assert_eq!(report.status, AuditStatus::Warn);
+        assert!(text.contains("occurrences: 5"));
+        assert_eq!(text.matches("occurrences:").count(), 1);
+        assert!(text.contains("line 1: line 1"));
+        assert!(text.contains("line 3: line 3"));
     }
 }

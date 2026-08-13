@@ -75,6 +75,13 @@ pub fn collect_referenced_sources(
                 out.files.push(canonical);
             }
             SourceLocation::Remote(url) => {
+                if source.dynamic {
+                    out.skipped.push(SkippedFile::security_relevant(
+                        safe_url_label(url),
+                        "dynamic remote source was not fetched because its URL is unresolved",
+                    ));
+                    continue;
+                }
                 if !config.fetch_remote_sources {
                     out.skipped.push(SkippedFile::security_relevant(
                         safe_url_label(url),
@@ -255,6 +262,7 @@ fn safe_url_label(raw: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{config::Config, pkgbuild_parser::parse_pkgbuild};
 
     #[test]
     fn safe_filename_removes_path_separators() {
@@ -301,5 +309,20 @@ mod tests {
             safe_url_label("https://user:password@example.com/source"),
             "https://example.com/source"
         );
+    }
+
+    #[test]
+    fn does_not_fetch_unresolved_dynamic_remote_sources() {
+        let root = tempfile::tempdir().unwrap();
+        let pkgbuild = parse_pkgbuild(r#"source=("https://example.invalid/${pkgver}.tar.gz")"#);
+        let config = Config {
+            fetch_remote_sources: true,
+            ..Config::default()
+        };
+        let files = collect_referenced_sources(root.path(), &pkgbuild, &config).unwrap();
+        assert!(files.files.is_empty());
+        assert_eq!(files.skipped.len(), 1);
+        assert!(files.skipped[0].reason.contains("was not fetched"));
+        assert!(files.skipped[0].is_security_relevant());
     }
 }

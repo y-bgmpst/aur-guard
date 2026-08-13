@@ -141,7 +141,10 @@ pub fn scan_pkgbuild_metadata(pkgbuild: &Pkgbuild) -> Vec<Finding> {
 
 pub fn scan_text_file(rel_path: &str, text: &str) -> Vec<Finding> {
     let mut findings = Vec::new();
-    scan_unsupported_shell(rel_path, text, &mut findings);
+    let kind = file_kind(rel_path);
+    if matches!(kind, FileKind::Shell) {
+        scan_unsupported_shell(rel_path, text, &mut findings);
+    }
 
     if rel_path.ends_with(".install") {
         findings.push(Finding::new(
@@ -180,18 +183,116 @@ pub fn scan_text_file(rel_path: &str, text: &str) -> Vec<Finding> {
     }
 
     let lines = text.lines().collect::<Vec<_>>();
-    for (idx, line) in lines.iter().enumerate() {
+    let mut checksum_block = false;
+    for (idx, _line) in lines.iter().enumerate() {
         let line_no = idx + 1;
-        let trimmed = line.trim();
+        let code = strip_shell_comment(&logical_line(&lines, idx));
+        let trimmed = code.trim();
         if trimmed.is_empty() || trimmed.starts_with('#') {
             continue;
         }
 
-        scan_line_rules(rel_path, line_no, line, &mut findings);
+        let checksum_assignment = re(
+            r"(?i)^\s*(?:md5|sha1|sha224|sha256|sha384|sha512|b2)sums(?:_[A-Za-z0-9_]+)?\s*(?:\+?=)",
+        )
+        .is_match(trimmed);
+        let in_checksum_block = checksum_block || checksum_assignment;
+        if matches!(kind, FileKind::Shell | FileKind::Hook) {
+            scan_line_rules(rel_path, line_no, &code, in_checksum_block, &mut findings);
+        }
+        if checksum_assignment {
+            checksum_block = !trimmed.contains(')');
+        } else if checksum_block && trimmed.contains(')') {
+            checksum_block = false;
+        }
     }
 
-    scan_chmod_execute(rel_path, &lines, &mut findings);
+    if matches!(kind, FileKind::Shell) {
+        scan_chmod_execute(rel_path, &lines, &mut findings);
+    }
     findings
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FileKind {
+    Shell,
+    Hook,
+    Metadata,
+    Generic,
+}
+
+fn file_kind(rel_path: &str) -> FileKind {
+    if rel_path == "PKGBUILD"
+        || rel_path.ends_with(".install")
+        || rel_path.ends_with(".sh")
+        || rel_path.ends_with(".bash")
+    {
+        FileKind::Shell
+    } else if rel_path.ends_with(".hook") {
+        FileKind::Hook
+    } else if rel_path == ".SRCINFO"
+        || rel_path.ends_with(".toml")
+        || rel_path.ends_with(".json")
+        || rel_path.ends_with(".yaml")
+        || rel_path.ends_with(".yml")
+    {
+        FileKind::Metadata
+    } else {
+        FileKind::Generic
+    }
+}
+
+fn strip_shell_comment(line: &str) -> String {
+    let mut out = String::with_capacity(line.len());
+    let mut single = false;
+    let mut double = false;
+    let mut escaped = false;
+    let mut previous_was_whitespace = true;
+
+    for ch in line.chars() {
+        if escaped {
+            out.push(ch);
+            escaped = false;
+            previous_was_whitespace = false;
+            continue;
+        }
+        if !single && ch == '\\' {
+            out.push(ch);
+            escaped = true;
+            previous_was_whitespace = false;
+            continue;
+        }
+        if !double && ch == '\'' {
+            single = !single;
+            out.push(ch);
+            previous_was_whitespace = false;
+            continue;
+        }
+        if !single && ch == '"' {
+            double = !double;
+            out.push(ch);
+            previous_was_whitespace = false;
+            continue;
+        }
+        if !single && !double && ch == '#' && previous_was_whitespace {
+            break;
+        }
+        previous_was_whitespace = ch.is_whitespace();
+        out.push(ch);
+    }
+    out
+}
+
+fn logical_line(lines: &[&str], index: usize) -> String {
+    let mut result = lines[index].to_string();
+    let mut next = index + 1;
+    while result.trim_end().ends_with('\\') && next < lines.len() {
+        result.pop();
+        result.push(' ');
+        result.push_str(lines[next].trim());
+        next += 1;
+    }
+    result
 }
 
 fn scan_unsupported_shell(rel_path: &str, text: &str, findings: &mut Vec<Finding>) {
@@ -204,11 +305,11 @@ fn scan_unsupported_shell(rel_path: &str, text: &str, findings: &mut Vec<Finding
     }
 
     for (line_no, line) in text.lines().enumerate() {
-        let trimmed = line.trim();
+        let trimmed = strip_shell_comment(line).trim().to_string();
         let unsupported =
             re(r"\$\(|`|\$\{|\b(eval|declare\s+-n)\b|<\(|>\(|<<<|<<-?[[:space:]]*[A-Za-z_]")
-                .is_match(trimmed)
-                || contains_unquoted_backslash(trimmed);
+                .is_match(&trimmed)
+                || contains_unquoted_backslash(&trimmed);
         if unsupported {
             findings.push(
                 Finding::new(
@@ -385,8 +486,15 @@ fn is_checksum_key(key: &str) -> bool {
         || lower.starts_with("sha512sums_")
 }
 
-fn scan_line_rules(rel_path: &str, line_no: usize, line: &str, findings: &mut Vec<Finding>) {
+fn scan_line_rules(
+    rel_path: &str,
+    line_no: usize,
+    line: &str,
+    checksum_metadata: bool,
+    findings: &mut Vec<Finding>,
+) {
     let trimmed = line.trim();
+    let command_text = strip_quoted_text(trimmed);
 
     if re(r"(?i)\b(curl|wget)\b[^#\n]*\|\s*(sudo\s+)?(sh|bash|dash|zsh|python|perl|ruby|node)\b")
         .is_match(trimmed)
@@ -440,7 +548,7 @@ fn scan_line_rules(rel_path: &str, line_no: usize, line: &str, findings: &mut Ve
         );
     }
 
-    if re(r"[A-Za-z0-9+/]{120,}={0,2}").is_match(trimmed) {
+    if !checksum_metadata && re(r"[A-Za-z0-9+/]{120,}={0,2}").is_match(trimmed) {
         findings.push(
             Finding::new(
                 "obfuscation.long-base64",
@@ -485,8 +593,12 @@ fn scan_line_rules(rel_path: &str, line_no: usize, line: &str, findings: &mut Ve
         );
     }
 
-    if re(r"(?i)(/etc/profile|\.bashrc|\.zshrc|\.profile|systemctl\b|/etc/systemd|/etc/pacman\.d/hooks|/usr/share/libalpm/hooks|\.hook\b)")
+    let assignment_with_hook_name =
+        re(r"(?i)^\s*[A-Za-z_][A-Za-z0-9_]*(?:_[A-Za-z0-9_]+)?\s*(?:\+?=).*\.hook\b")
+            .is_match(trimmed);
+    if re(r"(?i)(/etc/profile|\.bashrc|\.zshrc|\.profile|systemctl\b|/etc/systemd|/etc/pacman\.d/hooks|/usr/share/libalpm/hooks)")
         .is_match(trimmed)
+        || (!assignment_with_hook_name && re(r"(?i)\.hook\b").is_match(trimmed))
     {
         let severity = if trimmed.contains("$pkgdir") || trimmed.contains("${pkgdir}") {
             Severity::Medium
@@ -507,7 +619,7 @@ fn scan_line_rules(rel_path: &str, line_no: usize, line: &str, findings: &mut Ve
         );
     }
 
-    if re(r"(?i)\bgit\s+(clone|fetch|ls-remote|submodule\s+update)\b").is_match(trimmed) {
+    if re(r"(?i)\bgit\s+(clone|fetch|ls-remote|submodule\s+update)\b").is_match(&command_text) {
         findings.push(
             Finding::new(
                 "network.git-fetch",
@@ -539,7 +651,7 @@ fn scan_line_rules(rel_path: &str, line_no: usize, line: &str, findings: &mut Ve
         );
     }
 
-    if re(r#"(?i)\beval\b|\b(python|perl|node|ruby)\s+-e\b|\bexec\s*\(|\bcompile\s*\(|\btr\s+['"]?A-Za-z|\$\{[^}]+//|__import__\(['"]base64['"]\)"#)
+    if re(r#"(?i)\beval\b|\b(python|perl|node|ruby)\s+-e\b|\bexec\s*\(|\bcompile\s*\(|\btr\s+['"]?A-Za-z|__import__\(['"]base64['"]\)"#)
         .is_match(trimmed)
     {
         findings.push(
@@ -574,6 +686,33 @@ fn scan_line_rules(rel_path: &str, line_no: usize, line: &str, findings: &mut Ve
     }
 }
 
+fn strip_quoted_text(line: &str) -> String {
+    let mut out = String::with_capacity(line.len());
+    let mut single = false;
+    let mut double = false;
+    let mut escaped = false;
+    for ch in line.chars() {
+        if escaped {
+            out.push(' ');
+            escaped = false;
+        } else if !single && ch == '\\' {
+            out.push(' ');
+            escaped = true;
+        } else if !double && ch == '\'' {
+            single = !single;
+            out.push(' ');
+        } else if !single && ch == '"' {
+            double = !double;
+            out.push(' ');
+        } else if single || double {
+            out.push(' ');
+        } else {
+            out.push(ch);
+        }
+    }
+    out
+}
+
 fn writes_outside_pkgdir(line: &str) -> bool {
     if line.contains("$pkgdir")
         || line.contains("${pkgdir}")
@@ -583,8 +722,66 @@ fn writes_outside_pkgdir(line: &str) -> bool {
         return false;
     }
 
-    re(r#"(?i)\b(install|cp|mv|mkdir|touch|ln|tee|sed)\b[^#\n]*([[:space:]"'=])/(etc|usr|bin|sbin|home|root|var|boot|lib)\b"#)
+    if let Some(destination) = ln_destination(line) {
+        return re(r"^/(etc|usr|bin|sbin|home|root|var|boot|lib)(/|$)").is_match(&destination);
+    }
+
+    re(r#"(?i)\b(install|cp|mv|mkdir|touch|tee|sed)\b[^#\n]*([[:space:]"'=])/(etc|usr|bin|sbin|home|root|var|boot|lib)\b"#)
         .is_match(line)
+}
+
+fn ln_destination(line: &str) -> Option<String> {
+    let words = shell_words(line);
+    let command = words.iter().position(|word| word == "ln")?;
+    let mut args = words.into_iter().skip(command + 1).peekable();
+    let mut operands = Vec::new();
+    while let Some(arg) = args.next() {
+        if arg == "--" {
+            operands.extend(args);
+            break;
+        }
+        if arg.starts_with('-') {
+            if arg == "-t" || arg == "--target-directory" {
+                return args.next();
+            }
+            if let Some(value) = arg.strip_prefix("--target-directory=") {
+                return Some(value.to_string());
+            }
+            continue;
+        }
+        operands.push(arg);
+    }
+    operands.get(1).cloned()
+}
+
+fn shell_words(line: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut current = String::new();
+    let mut single = false;
+    let mut double = false;
+    let mut escaped = false;
+    for ch in line.chars() {
+        if escaped {
+            current.push(ch);
+            escaped = false;
+        } else if !single && ch == '\\' {
+            escaped = true;
+        } else if !double && ch == '\'' {
+            single = !single;
+        } else if !single && ch == '"' {
+            double = !double;
+        } else if !single && !double && ch.is_whitespace() {
+            if !current.is_empty() {
+                words.push(std::mem::take(&mut current));
+            }
+        } else {
+            current.push(ch);
+        }
+    }
+    if !current.is_empty() {
+        words.push(current);
+    }
+    words
 }
 
 fn scan_chmod_execute(rel_path: &str, lines: &[&str], findings: &mut Vec<Finding>) {
@@ -739,6 +936,86 @@ mod tests {
             findings
                 .iter()
                 .any(|f| f.rule_id == "manual-review.ambiguous-shell")
+        );
+    }
+
+    #[test]
+    fn ignores_checksum_blobs_and_metadata_commands() {
+        let checksum = format!(
+            "sha256sums=(\n  '{}'\n)\nsha512sums=('{}')\nb2sums=('{}')",
+            "a".repeat(64),
+            "b".repeat(128),
+            "c".repeat(128)
+        );
+        let findings = scan_text_file("PKGBUILD", &checksum);
+        assert!(
+            !findings
+                .iter()
+                .any(|f| f.rule_id == "obfuscation.long-base64")
+        );
+
+        let metadata = scan_text_file(".SRCINFO", "source = systemd-boot.hook\n");
+        assert!(!metadata.iter().any(|f| f.rule_id == "system.modification"));
+    }
+
+    #[test]
+    fn preserves_payload_detection_and_hook_analysis() {
+        let payload = format!("echo {}", "A".repeat(128));
+        assert!(
+            scan_text_file("PKGBUILD", &payload)
+                .iter()
+                .any(|f| f.rule_id == "obfuscation.long-base64")
+        );
+
+        let hook = scan_text_file(
+            "update.hook",
+            "[Action]\nExec = /usr/bin/systemctl daemon-reload\n",
+        );
+        assert!(hook.iter().any(|f| f.rule_id == "pacman-hook.present"));
+        assert!(hook.iter().any(|f| f.rule_id == "system.modification"));
+    }
+
+    #[test]
+    fn comment_aware_matching_preserves_quoted_hashes() {
+        let findings = scan_text_file(
+            "PKGBUILD",
+            "foo=bar # git fetch\nfoo=\"# git fetch\"\nfoo='# git fetch'\nfoo=\\#bar\ngit fetch origin\n",
+        );
+        assert_eq!(
+            findings
+                .iter()
+                .filter(|f| f.rule_id == "network.git-fetch")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn symlink_analysis_uses_destination() {
+        let staged = scan_text_file(
+            "PKGBUILD",
+            "ln -s /usr/share/code/LICENSE \\\n                 \"${pkgdir}/usr/share/licenses/demo/LICENSE\"\n",
+        );
+        assert!(
+            !staged
+                .iter()
+                .any(|f| f.rule_id == "filesystem.outside-pkgdir")
+        );
+
+        let host = scan_text_file("PKGBUILD", "ln -s foo /etc/foo\n");
+        assert!(
+            host.iter()
+                .any(|f| f.rule_id == "filesystem.outside-pkgdir")
+        );
+    }
+
+    #[test]
+    fn parameter_substitution_is_not_dynamic_code() {
+        let findings = scan_text_file("PKGBUILD", "x=\"${pkgver//_/-}\"\n");
+        assert!(
+            !findings
+                .iter()
+                .any(|f| f.rule_id == "obfuscation.dynamic-code")
         );
     }
 }

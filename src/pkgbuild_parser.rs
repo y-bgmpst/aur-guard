@@ -221,7 +221,8 @@ struct Assignment {
 }
 
 fn collect_assignments(text: &str) -> Vec<Assignment> {
-    let assign_re = Regex::new(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$").expect("valid regex");
+    let assign_re =
+        Regex::new(r"^\s*([A-Za-z_][A-Za-z0-9_]*)(\+?)\s*=\s*(.*)$").expect("valid regex");
     let raw_lines = text
         .lines()
         .enumerate()
@@ -237,7 +238,7 @@ fn collect_assignments(text: &str) -> Vec<Assignment> {
             continue;
         };
         let name = caps.get(1).expect("capture").as_str().to_string();
-        let value = caps.get(2).expect("capture").as_str().to_string();
+        let value = caps.get(3).expect("capture").as_str().to_string();
         let starts_array = value.trim_start().starts_with('(');
         let mut lines = vec![(*line_no, value.clone())];
 
@@ -580,6 +581,19 @@ pkgver() {
     fn marks_dynamic_source_words() {
         let parsed = parse_pkgbuild(r#"source=("https://x/$pkgver/$(uname)")"#);
         assert!(parsed.sources[0].dynamic);
+    }
+
+    #[test]
+    fn parses_appended_sources_and_architecture_specific_sources() {
+        let parsed = parse_pkgbuild(
+            "source=('a')\nsource+=('b')\nsource_x86_64=('x')\nsource_x86_64+=('y')\n",
+        );
+        let values = parsed
+            .sources
+            .iter()
+            .map(|source| source.value.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(values, ["a", "b", "x", "y"]);
     }
 
     proptest! {
