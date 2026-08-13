@@ -45,6 +45,8 @@ The audit path must not run package-controlled operations, including:
 Wrapper mode is the explicit exception at the process boundary: after a
 successful audit it invokes `/usr/bin/makepkg`, which is expected to process
 the package. The audit itself never invokes that package-controlled code.
+The audit assumes the inspected package tree is not modified by another local
+process between inspection and makepkg execution.
 
 Wrapper mode executes only `/usr/bin/makepkg` (with `makepkg` accepted as an
 input alias). It audits before every package-processing invocation. Only

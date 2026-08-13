@@ -40,7 +40,7 @@ pub fn collect_referenced_sources(
 ) -> Result<SourceFiles> {
     let mut out = SourceFiles::empty();
 
-    for source in &pkgbuild.sources {
+    for (source_index, source) in pkgbuild.sources.iter().enumerate() {
         match &source.location {
             SourceLocation::Local(path) => {
                 if source.dynamic {
@@ -93,7 +93,7 @@ pub fn collect_referenced_sources(
                     out._tempdir = Some(tempfile::Builder::new().prefix("sources-").tempdir()?);
                 }
                 let tempdir = out._tempdir.as_ref().expect("created above").path();
-                match fetch_https_source(url, tempdir, config.max_file_bytes) {
+                match fetch_https_source(url, tempdir, config.max_file_bytes, source_index) {
                     Ok(path) => out.files.push(path),
                     Err(err) => out.skipped.push(SkippedFile::security_relevant(
                         safe_url_label(url),
@@ -109,7 +109,12 @@ pub fn collect_referenced_sources(
     Ok(out)
 }
 
-fn fetch_https_source(url: &str, tempdir: &Path, max_file_bytes: u64) -> Result<PathBuf> {
+fn fetch_https_source(
+    url: &str,
+    tempdir: &Path,
+    max_file_bytes: u64,
+    source_index: usize,
+) -> Result<PathBuf> {
     let mut current = validate_fetch_url(url)?;
     let client = Client::builder()
         .timeout(std::time::Duration::from_secs(30))
@@ -156,7 +161,7 @@ fn fetch_https_source(url: &str, tempdir: &Path, max_file_bytes: u64) -> Result<
         anyhow::bail!("remote file exceeds max_file_bytes");
     }
 
-    let filename = safe_filename(url);
+    let filename = format!("{source_index:04}-{}", safe_filename(url));
     let path = tempdir.join(filename);
     let mut file =
         fs::File::create(&path).with_context(|| format!("failed to create {}", path.display()))?;
@@ -254,6 +259,15 @@ mod tests {
     #[test]
     fn safe_filename_removes_path_separators() {
         assert_eq!(safe_filename("https://example.invalid/a/b?x=1"), "b_x_1");
+    }
+
+    #[test]
+    fn fetched_source_names_are_unique_per_source() {
+        let first = format!("{:04}-{}", 0, safe_filename("https://a.example/payload"));
+        let second = format!("{:04}-{}", 1, safe_filename("https://b.example/payload"));
+        assert_ne!(first, second);
+        assert!(first.ends_with("-payload"));
+        assert!(second.ends_with("-payload"));
     }
 
     #[test]

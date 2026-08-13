@@ -57,12 +57,10 @@ fn split_command(mut raw: Vec<OsString>) -> Result<(OsString, Vec<OsString>)> {
 }
 
 fn should_skip_audit(args: &[OsString]) -> bool {
-    args.iter().any(|arg| {
-        matches!(
-            arg.to_string_lossy().as_ref(),
-            "--help" | "-h" | "--version" | "-V"
-        )
-    })
+    matches!(
+        args,
+        [arg] if matches!(arg.to_string_lossy().as_ref(), "--help" | "-h" | "--version" | "-V")
+    )
 }
 
 fn run_command(command: OsString, args: Vec<OsString>) -> Result<u8> {
@@ -104,6 +102,21 @@ mod tests {
         }
         for arg in ["--help", "-h", "--version", "-V"] {
             assert!(should_skip_audit(&[OsString::from(arg)]), "{arg}");
+        }
+    }
+
+    #[test]
+    fn mixed_help_and_version_arguments_do_not_skip_audit() {
+        for args in [
+            vec!["--help", "-si"],
+            vec!["-si", "--help"],
+            vec!["--printsrcinfo", "--help"],
+            vec!["--help", "--printsrcinfo"],
+            vec!["--help", "--version"],
+            vec!["--", "--help"],
+        ] {
+            let args = args.into_iter().map(OsString::from).collect::<Vec<_>>();
+            assert!(!should_skip_audit(&args), "{args:?}");
         }
     }
 
