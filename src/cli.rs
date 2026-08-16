@@ -133,25 +133,32 @@ fn run(cli: Cli) -> Result<u8> {
     }
 }
 
+enum AuditSource<'a> {
+    Local(&'a PathBuf),
+    Remote(&'a str),
+}
+
 pub fn run_audit(args: AuditArgs) -> Result<u8> {
     let mut config = Config::load()?;
     apply_audit_overrides(&mut config, &args)?;
 
-    if args.package.is_some() && args.pkgdir.is_some() {
-        bail!("provide either a package name or --pkgdir, not both");
-    }
-    if args.package.is_none() && args.pkgdir.is_none() {
-        Cli::command().print_help()?;
-        eprintln!();
-        return Ok(3);
-    }
+    let source = match (&args.package, &args.pkgdir) {
+        (Some(_), Some(_)) => bail!("provide either a package name or --pkgdir, not both"),
+        (None, None) => {
+            Cli::command().print_help()?;
+            eprintln!();
+            return Ok(3);
+        }
+        (Some(package), None) => AuditSource::Remote(package),
+        (None, Some(pkgdir)) => AuditSource::Local(pkgdir),
+    };
 
-    let target = if let Some(pkgdir) = &args.pkgdir {
-        aur::prepare_local(pkgdir)
-            .with_context(|| format!("invalid --pkgdir {}", pkgdir.display()))?
-    } else {
-        let package = args.package.as_deref().expect("checked above");
-        aur::clone_package(package, args.clone_url.as_deref(), &config)?
+    let target = match source {
+        AuditSource::Local(pkgdir) => aur::prepare_local(pkgdir)
+            .with_context(|| format!("invalid --pkgdir {}", pkgdir.display()))?,
+        AuditSource::Remote(package) => {
+            aur::clone_package(package, args.clone_url.as_deref(), &config)?
+        }
     };
 
     let mut report = scanner::audit_target(&target, &config)?;
