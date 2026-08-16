@@ -1,5 +1,20 @@
 # aur-guard
 
+## TL;DR
+
+`aur-guard` statically scans an AUR package's `PKGBUILD`/`.SRCINFO`/install
+scripts for red flags (remote-pipe-to-shell, obfuscated payloads, privilege
+escalation, unsafe writes, skipped checksums, etc.) **before** you build or
+install it — no code from the package is ever executed.
+
+```sh
+aur-guard audit google-chrome        # audit an AUR package by name
+aur-guard wrapper -- makepkg -si     # or gate makepkg itself
+```
+
+Exit code is non-zero on WARN/FAIL by default (`--warn-only` to relax). JSON
+output and an optional OpenAI-compatible LLM review are available; see below.
+
 `aur-guard` is a fast, static AUR package security auditing CLI for Arch Linux.
 It audits AUR package build files before any build or install step.
 
