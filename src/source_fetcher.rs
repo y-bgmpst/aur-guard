@@ -122,14 +122,17 @@ fn fetch_https_source(
     max_file_bytes: u64,
     source_index: usize,
 ) -> Result<PathBuf> {
-    let mut current = validate_fetch_url(url)?;
     let client = Client::builder()
         .timeout(std::time::Duration::from_secs(30))
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .context("failed to build HTTP client")?;
+    let response = resolve_https_response(url, &client)?;
+    write_response_to_file(response, tempdir, max_file_bytes, source_index, url)
+}
 
-    let mut response = None;
+fn resolve_https_response(url: &str, client: &Client) -> Result<reqwest::blocking::Response> {
+    let mut current = validate_fetch_url(url)?;
     for _ in 0..=3 {
         let candidate = validate_fetch_url(current.as_str())?;
         let next = client
@@ -146,10 +149,18 @@ fn fetch_https_source(
             current = next_redirect_url(&candidate, location)?;
             continue;
         }
-        response = Some(next);
-        break;
+        return Ok(next);
     }
-    let mut response = response.ok_or_else(|| anyhow::anyhow!("too many redirects"))?;
+    anyhow::bail!("too many redirects")
+}
+
+fn write_response_to_file(
+    mut response: reqwest::blocking::Response,
+    tempdir: &Path,
+    max_file_bytes: u64,
+    source_index: usize,
+    url_for_filename: &str,
+) -> Result<PathBuf> {
     if !response.status().is_success() {
         anyhow::bail!("HTTP {}", response.status());
     }
@@ -168,7 +179,7 @@ fn fetch_https_source(
         anyhow::bail!("remote file exceeds max_file_bytes");
     }
 
-    let filename = format!("{source_index:04}-{}", safe_filename(url));
+    let filename = format!("{source_index:04}-{}", safe_filename(url_for_filename));
     let path = tempdir.join(filename);
     let mut file =
         fs::File::create(&path).with_context(|| format!("failed to create {}", path.display()))?;
@@ -324,5 +335,91 @@ mod tests {
         assert_eq!(files.skipped.len(), 1);
         assert!(files.skipped[0].reason.contains("was not fetched"));
         assert!(files.skipped[0].is_security_relevant());
+    }
+
+    /// Spawns a background thread that serves one raw HTTP response to the
+    /// first connection it receives, then returns the address to fetch it
+    /// from. Used to exercise `write_response_to_file` against a real
+    /// `reqwest::blocking::Response`, which can't be constructed by hand.
+    fn spawn_single_response_server(raw_response: Vec<u8>) -> String {
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut discard = [0u8; 1024];
+            let _ = stream.read(&mut discard);
+            let _ = stream.write_all(&raw_response);
+        });
+        format!("http://{addr}/payload")
+    }
+
+    fn get_response(url: &str) -> reqwest::blocking::Response {
+        Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .unwrap()
+            .get(url)
+            .send()
+            .unwrap()
+    }
+
+    #[test]
+    fn writes_successful_response_body_to_file() {
+        let url = spawn_single_response_server(
+            b"HTTP/1.1 200 OK\r\nContent-Length: 11\r\nConnection: close\r\n\r\nhello world"
+                .to_vec(),
+        );
+        let response = get_response(&url);
+        let tempdir = tempfile::tempdir().unwrap();
+
+        let path = write_response_to_file(response, tempdir.path(), 1024, 2, &url).unwrap();
+
+        assert!(
+            path.file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .starts_with("0002-")
+        );
+        assert_eq!(fs::read_to_string(&path).unwrap(), "hello world");
+    }
+
+    #[test]
+    fn rejects_response_over_content_length_limit() {
+        let url = spawn_single_response_server(
+            b"HTTP/1.1 200 OK\r\nContent-Length: 11\r\nConnection: close\r\n\r\nhello world"
+                .to_vec(),
+        );
+        let response = get_response(&url);
+        let tempdir = tempfile::tempdir().unwrap();
+
+        let err = write_response_to_file(response, tempdir.path(), 5, 0, &url).unwrap_err();
+        assert!(err.to_string().contains("exceeds max_file_bytes"));
+    }
+
+    #[test]
+    fn rejects_body_over_limit_when_content_length_is_missing() {
+        let url = spawn_single_response_server(
+            b"HTTP/1.1 200 OK\r\nConnection: close\r\n\r\nhello world".to_vec(),
+        );
+        let response = get_response(&url);
+        let tempdir = tempfile::tempdir().unwrap();
+
+        let err = write_response_to_file(response, tempdir.path(), 5, 0, &url).unwrap_err();
+        assert!(err.to_string().contains("exceeds max_file_bytes"));
+    }
+
+    #[test]
+    fn rejects_non_success_status() {
+        let url = spawn_single_response_server(
+            b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_vec(),
+        );
+        let response = get_response(&url);
+        let tempdir = tempfile::tempdir().unwrap();
+
+        let err = write_response_to_file(response, tempdir.path(), 1024, 0, &url).unwrap_err();
+        assert!(err.to_string().contains("404"));
     }
 }
