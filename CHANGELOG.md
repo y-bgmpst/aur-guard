@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to `aur-guard` are documented here. Format follows
+All notable changes to `aur-guard` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project
 follows [Semantic Versioning](https://semver.org/).
 
@@ -8,7 +8,7 @@ follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- GitHub Actions CI: `cargo fmt --check`, `cargo clippy -D warnings`,
+- GitHub Actions CI: `cargo fmt --check`, `cargo clippy -- -D warnings`,
   `cargo build`, and `cargo test` on every push/PR.
 - TL;DR section at the top of the README.
 - Unit test coverage for `fetch_https_source`'s response handling
